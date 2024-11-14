@@ -60,6 +60,17 @@ class Variant:
     def is_default_variant(self) -> bool:
         return self.name == DEFAULT_VARIANT
     
+    @property
+    def name_full(self) -> str:
+        """
+        return <port>-<board>-<variant>
+        """
+        assert self.board.port is not None
+    
+        parts = [self.board.port.name, self.board.name]
+        if not self.is_default_variant:
+            parts.append(self.name)
+        return "-".join(parts)
 
 @dataclass(order=True)
 class Board:
@@ -155,19 +166,39 @@ class Board:
     @property
     def default_variant(self) -> Variant:
         variant = self.variants[0]
-        assert variant.name == DEFAULT_VARIANT
+        if not self.physical_board:
+            assert variant.name == DEFAULT_VARIANT
         return variant
 
     @property
     def variants_without_default(self) -> list[Variant]:
-        assert self.variants[0].is_default_variant
-        return self.variants[1:]
+        if self.physical_board:
+            # Example 'stm32'
+            assert self.variants[0].is_default_variant
+            return self.variants[1:]
+        # Example 'unix'
+        return self.variants
     
     def find_variant(self, variant: str) -> Variant | None:
+        """
+        Returns the variant.
+        Returns None if not found
+        """
         for v in self.variants:
             if v.name == variant:
                 return v
         return None
+    
+    def get_variant(self, variant: str) -> Variant:
+        """
+        Returns the variant.
+        Raise ValueError if variant not found
+        """
+        v = self.find_variant(variant)
+        if v is None:
+            raise ValueError(f"Variant '{variant}' not found for board '{self.name}': Valid variants are: {[v.name for v in self.variants]}")
+        return v
+
 
 @dataclass(order=True)
 class Port:
@@ -178,7 +209,7 @@ class Port:
     directory: Path
     """
     The directory of the source code.
-    Example: "<repo>/ports"
+    Example: "<repo>/ports/stm32"
     """
     boards: dict[str, Board] = field(default_factory=dict, repr=False)
     """
@@ -190,7 +221,7 @@ class Port:
         """
         The top directory of the micropython repo
         """
-        repo = self.directory.parent
+        repo = self.directory.parent.parent
         assert repo.is_dir(), repo
         assert (repo / "ports" / "renesas-ra").is_dir()
         return repo
@@ -226,7 +257,7 @@ class Database:
             # Create a port
             port = self.ports.get(port_name, None)
             if port is None:
-                port = Port(name=port_name, directory=port_directory.parent)
+                port = Port(name=port_name, directory=port_directory)
                 self.ports[port_name] = port
 
             # Load board.json and attach it to the board
@@ -254,15 +285,24 @@ class Database:
                 deploy=[],
                 physical_board=False,
             )
-            board.variants.append(Variant(DEFAULT_VARIANT, "Default variant", board=board))
             variant_names = [
                 var.name for var in path.glob("variants/*") if var.is_dir()
             ]
             board.variants.extend([Variant(name=v, text="", board=board) for v in variant_names])
 
             
-            port = Port(name=special_port_name, directory=path.parent, boards={special_port_name: board})
+            port = Port(name=special_port_name, directory=path, boards={special_port_name: board})
             board.port = port
 
             self.ports[special_port_name] = port
             self.boards[board.name] = board
+
+    def get_board(self, board: str) -> Board:
+        """
+        Returns the board.
+        Raise ValueError if board not found
+        """
+        try:
+            return self.boards[board]
+        except KeyError as e:
+            raise ValueError(f"Board '{board}' not found. Valid boards are {[b for b in self.boards]}") from e

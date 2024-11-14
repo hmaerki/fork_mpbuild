@@ -24,6 +24,9 @@ BUILD_CONTAINERS = {
     "unix": "gcc:12-bookworm",  # Special, doesn't have boards
 }
 
+class MpbuildNotSupportedException(Exception):
+    pass
+
 def get_build_container(variant: Variant) -> str:
     """
     Returns the container to be used for this variant.
@@ -40,7 +43,10 @@ def get_build_container(variant: Variant) -> str:
         # and a riscv core as a variant
         return "micropython/build-micropython-rp2350riscv"
 
-    return  BUILD_CONTAINERS[port.name]
+    try:
+        return BUILD_CONTAINERS[port.name]
+    except KeyError as e:
+        raise MpbuildNotSupportedException(variant.name) from e
 
 IDF_DEFAULT = "v5.2.2"
 
